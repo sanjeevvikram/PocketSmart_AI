@@ -1,1 +1,66 @@
-{% extends 'base.html' %}{% block content %}<section class="auth card"><h1>{{ 'Create account' if mode=='register' else 'Welcome back' }}</h1><form id="authForm"><label>Email<input name="email" type="email" required></label><label>Password<input name="password" type="password" minlength="8" required></label><button class="btn" type="submit">{{ 'Register' if mode=='register' else 'Login' }}</button></form><p id="message"></p><a href="{{ '/login' if mode=='register' else '/register' }}">{{ 'Already have an account? Login' if mode=='register' else 'Need an account? Register' }}</a></section>{% endblock %}{% block scripts %}<script>window.AUTH_MODE='{{ mode }}'</script>{% endblock %}
+{% extends 'base.html' %}
+
+{% block content %}
+<section class="auth card">
+    <h1>{{ 'Create account' if mode == 'register' else 'Welcome back' }}</h1>
+
+    <form id="authForm">
+        <label>
+            Email
+            <input name="email" type="email" required />
+        </label>
+
+        <label>
+            Password
+            <input name="password" type="password" minlength="8" required />
+        </label>
+
+        <button class="btn" type="submit">
+            {{ 'Register' if mode == 'register' else 'Login' }}
+        </button>
+    </form>
+
+    <p id="message"></p>
+
+    <a href="{{ '/login' if mode == 'register' else '/register' }}">
+        {{ 'Already have an account? Login' if mode == 'register' else 'Need an account? Register' }}
+    </a>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const form = document.getElementById("authForm");
+const message = document.getElementById("message");
+const mode = "{{ mode }}";
+
+form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const formData = new FormData(form);
+
+    const response = await fetch(
+        mode === "register" ? "/api/auth/register" : "/api/auth/login",
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            credentials: "same-origin",
+            body: JSON.stringify({
+                email: formData.get("email"),
+                password: formData.get("password")
+            })
+        }
+    );
+
+    const data = await response.json();
+
+    if (response.ok) {
+        window.location.href = mode === "register" ? "/login" : "/dashboard";
+    } else {
+        message.textContent = data.detail || "Something went wrong.";
+    }
+});
+</script>
+{% endblock %}
