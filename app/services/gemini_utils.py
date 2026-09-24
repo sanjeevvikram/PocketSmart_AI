@@ -1,66 +1,367 @@
 import json
+import os
 from typing import Any
+
 from google import genai
-from google.genai import types
-from .catalog import home_catalog, party_catalog, jewelry_catalog
-from ..config import get_settings
 
-settings=get_settings()
+from app.config import settings
 
-def _client():
-    if not settings.gemini_api_key:
+
+def get_client():
+    """Create and return the Gemini client."""
+    api_key = getattr(settings, "gemini_api_key", None) or os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
         return None
-    return genai.Client(api_key=settings.gemini_api_key)
 
-def _fallback_home(data: dict) -> dict:
-    budget=data["budget"]
-    candidates=home_catalog(data["items"])
-    rec=[]; total=0
-    for c in candidates:
-        qty=next((x["quantity"] for x in data["items"] if x["name"].lower()==c.title.lower()),1)
-        price=c.price*qty
-        if total+price <= budget*0.92:
-            rec.append({"title":c.title,"platform":c.platform,"category":c.category,"estimated_price":c.price,"quantity":qty,"reason":c.reason,"url":c.search_url}); total+=price
-    if not rec and candidates:
-        c=candidates[0]; rec=[{"title":c.title,"platform":c.platform,"category":c.category,"estimated_price":c.price,"quantity":1,"reason":c.reason,"url":c.search_url}]; total=c.price
-    return {"planner":"home","budget":budget,"estimated_total":round(total,2),"budget_remaining":round(budget-total,2),"allocation":{"furniture":round(total*.5,2),"lighting":round(total*.2,2),"decor":round(total*.3,2)},"summary":f"Fallback plan for a {data['style']} home setup.","recommendations":rec,"ai_generated":False,"source_note":"Demo catalog/search links; prices are illustrative and should be verified on the platform before purchase."}
+    return genai.Client(api_key=api_key)
 
-def _fallback_party(data: dict) -> dict:
-    budget=data["budget"]; alloc={"catering":budget*.45,"decoration":budget*.2,"entertainment":budget*.15,"venue":budget*.2}
-    rec=[]
-    for c in party_catalog(data["event_type"]):
-        share=alloc.get(c.category, budget*.1)
-        if share>0: rec.append({"title":c.title,"platform":c.platform,"category":c.category,"estimated_price":round(min(c.price,share),2),"quantity":1,"reason":c.reason,"url":c.search_url})
-    total=sum(x["estimated_price"] for x in rec)
-    return {"planner":"party","budget":budget,"estimated_total":round(total,2),"budget_remaining":round(max(0,budget-total),2),"allocation":{k:round(v,2) for k,v in alloc.items()},"summary":f"Budget allocation for {data['event_type']} with {data['guests']} guests.","recommendations":rec,"ai_generated":False,"source_note":"Demo vendor/search links; availability and pricing must be verified."}
 
-def _fallback_jewelry(data: dict) -> dict:
-    budget=data["budget"]; rec=[]; total=0
-    for c in jewelry_catalog(data["style"],data["occasion"]):
-        if total+c.price<=budget: rec.append({"title":c.title,"platform":c.platform,"category":c.category,"estimated_price":c.price,"quantity":1,"reason":c.reason,"url":c.search_url}); total+=c.price
-    return {"planner":"jewelry","budget":budget,"estimated_total":round(total,2),"budget_remaining":round(budget-total,2),"allocation":{"necklace":round(total*.5,2),"earrings":round(total*.3,2),"accent":round(total*.2,2)},"summary":f"{data['style'].title()} jewelry ideas for {data['occasion']}.","recommendations":rec,"ai_generated":False,"source_note":"Demo search links; prices are illustrative and should be verified before purchase."}
+def _safe_fallback(planner: str, data: dict) -> dict:
+    """Create a useful local fallback when Gemini is unavailable."""
 
-def _clean_json(text: str) -> dict:
-    text=text.strip()
-    if text.startswith("```"):
-        text=text.split("\n",1)[1].rsplit("```",1)[0]
-    return json.loads(text)
+    budget = float(data.get("budget", 0) or 0)
 
-def generate(planner: str, data: dict, image_bytes: bytes|None=None, mime_type: str|None=None) -> dict:
-    client=_client()
-    fallback={"home":_fallback_home,"party":_fallback_party,"jewelry":_fallback_jewelry}[planner](data)
-    if not client:
+    # ---------------------------------------------------------
+    # HOME FALLBACK
+    # ---------------------------------------------------------
+    if planner == "home":
+        allocation = {
+            "furniture": round(budget * 0.45, 2),
+            "lighting": round(budget * 0.20, 2),
+            "decor": round(budget * 0.20, 2),
+            "reserve": round(budget * 0.15, 2),
+        }
+
+        items = data.get("items", [])
+        recommendations = []
+
+        for item in items:
+            name = str(item.get("name", "Home item"))
+            quantity = int(item.get("quantity", 1) or 1)
+
+            name_lower = name.lower()
+
+            if "light" in name_lower:
+                price = 1500
+                category = "Lighting"
+            elif "fan" in name_lower:
+                price = 3500
+                category = "Appliances"
+            elif "table" in name_lower:
+                price = 5000
+                category = "Furniture"
+            else:
+                price = 2000
+                category = "Home"
+
+            recommendations.append(
+                {
+                    "title": name.title(),
+                    "platform": "Online Search",
+                    "category": category,
+                    "estimated_price": float(price),
+                    "quantity": quantity,
+                    "reason": f"Recommended for your {planner} plan.",
+                    "url": (
+                        "https://www.google.com/search?q="
+                        + name.replace(" ", "+")
+                    ),
+                }
+            )
+
+        estimated_total = sum(
+            item["estimated_price"] * item["quantity"]
+            for item in recommendations
+        )
+
+        if estimated_total > budget and budget > 0:
+            estimated_total = budget
+
+        return {
+            "planner": planner,
+            "budget": budget,
+            "estimated_total": float(estimated_total),
+            "budget_remaining": float(max(0, budget - estimated_total)),
+            "allocation": allocation,
+            "summary": "Budget-based home setup plan.",
+            "recommendations": recommendations,
+            "ai_generated": False,
+            "source_note": (
+                "Fallback plan; prices are illustrative and should "
+                "be verified before purchase."
+            ),
+        }
+
+    # ---------------------------------------------------------
+    # PARTY FALLBACK
+    # ---------------------------------------------------------
+    if planner == "party":
+        guests = int(data.get("guests", 0) or 0)
+        event_type = str(data.get("event_type", "event"))
+
+        allocation = {
+            "food": round(budget * 0.40, 2),
+            "decoration": round(budget * 0.20, 2),
+            "venue": round(budget * 0.20, 2),
+            "reserve": round(budget * 0.20, 2),
+        }
+
+        recommendations = [
+            {
+                "title": "Food and Refreshments",
+                "platform": "Online Search",
+                "category": "Food",
+                "estimated_price": float(allocation["food"]),
+                "quantity": 1,
+                "reason": f"Planned for {guests} guests.",
+                "url": (
+                    "https://www.google.com/search?q="
+                    "party+food+and+refreshments"
+                ),
+            },
+            {
+                "title": "Event Decorations",
+                "platform": "Online Search",
+                "category": "Decoration",
+                "estimated_price": float(allocation["decoration"]),
+                "quantity": 1,
+                "reason": f"Suitable for a {event_type} event.",
+                "url": (
+                    "https://www.google.com/search?q="
+                    "party+decorations"
+                ),
+            },
+            {
+                "title": "Venue",
+                "platform": "Online Search",
+                "category": "Venue",
+                "estimated_price": float(allocation["venue"]),
+                "quantity": 1,
+                "reason": "Budget allocation for the event venue.",
+                "url": (
+                    "https://www.google.com/search?q="
+                    "party+venue"
+                ),
+            },
+        ]
+
+        estimated_total = sum(
+            item["estimated_price"] * item["quantity"]
+            for item in recommendations
+        )
+
+        return {
+            "planner": planner,
+            "budget": budget,
+            "estimated_total": float(estimated_total),
+            "budget_remaining": float(max(0, budget - estimated_total)),
+            "allocation": allocation,
+            "summary": f"Budget-based plan for a {event_type} party.",
+            "recommendations": recommendations,
+            "ai_generated": False,
+            "source_note": (
+                "Fallback plan; prices are illustrative and should "
+                "be verified before purchase."
+            ),
+        }
+
+    # ---------------------------------------------------------
+    # JEWELRY FALLBACK
+    # ---------------------------------------------------------
+    if planner == "jewelry":
+        allocation = {
+            "jewelry": round(budget * 0.70, 2),
+            "accessories": round(budget * 0.15, 2),
+            "reserve": round(budget * 0.15, 2),
+        }
+
+        recommendations = [
+            {
+                "title": "Jewelry",
+                "platform": "Online Search",
+                "category": "Jewelry",
+                "estimated_price": float(allocation["jewelry"]),
+                "quantity": 1,
+                "reason": "Main jewelry budget allocation.",
+                "url": (
+                    "https://www.google.com/search?q="
+                    "jewelry"
+                ),
+            },
+            {
+                "title": "Accessories",
+                "platform": "Online Search",
+                "category": "Accessories",
+                "estimated_price": float(allocation["accessories"]),
+                "quantity": 1,
+                "reason": "Additional accessory allocation.",
+                "url": (
+                    "https://www.google.com/search?q="
+                    "jewelry+accessories"
+                ),
+            },
+        ]
+
+        estimated_total = sum(
+            item["estimated_price"] * item["quantity"]
+            for item in recommendations
+        )
+
+        return {
+            "planner": planner,
+            "budget": budget,
+            "estimated_total": float(estimated_total),
+            "budget_remaining": float(max(0, budget - estimated_total)),
+            "allocation": allocation,
+            "summary": "Budget-based jewelry plan.",
+            "recommendations": recommendations,
+            "ai_generated": False,
+            "source_note": (
+                "Fallback plan; prices are illustrative and should "
+                "be verified before purchase."
+            ),
+        }
+
+    # ---------------------------------------------------------
+    # GENERIC FALLBACK
+    # ---------------------------------------------------------
+    return {
+        "planner": planner,
+        "budget": budget,
+        "estimated_total": 0.0,
+        "budget_remaining": budget,
+        "allocation": {
+            "main": round(budget * 0.60, 2),
+            "support": round(budget * 0.25, 2),
+            "reserve": round(budget * 0.15, 2),
+        },
+        "summary": f"Fallback plan for a {planner}.",
+        "recommendations": [],
+        "ai_generated": False,
+        "source_note": (
+            "Fallback plan; prices are illustrative and should "
+            "be verified before purchase."
+        ),
+    }
+
+
+def generate(planner: str, data: dict) -> dict:
+    """Generate a plan using Gemini, with a safe local fallback."""
+
+    client = get_client()
+
+    # Always prepare a safe fallback first.
+    fallback = _safe_fallback(planner, data)
+
+    # If Gemini is not configured, use fallback.
+    if client is None:
+        print("GEMINI NOT CONFIGURED - USING FALLBACK PLAN")
         return fallback
-    prompt=f"""You are PocketSmart AI, a budget-aware recommendation assistant. Planner={planner}.\nUser data={json.dumps(data, ensure_ascii=False)}\nReturn ONLY valid JSON matching this schema: {{planner,budget,estimated_total,budget_remaining,allocation,summary,recommendations:[{{title,platform,category,estimated_price,quantity,reason,url}}],ai_generated,source_note}}.\nDo not invent real-time availability. Platform links may be search URLs. Keep estimated_total <= budget. Use concise reasons. Mark ai_generated true and explain that prices/availability require verification."""
-    contents: list[Any]=[prompt]
-    if image_bytes and mime_type:
-        contents.insert(0, types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
-        contents.insert(1, "Analyze the uploaded outfit image only for non-sensitive visible fashion characteristics relevant to jewelry matching.")
+
+    model = getattr(
+        settings,
+        "gemini_model",
+        None,
+    ) or os.getenv(
+        "GEMINI_MODEL",
+        "gemini-3.6-flash",
+    )
+
+    prompt = f"""
+You are PocketSmart AI, a budget planning assistant.
+
+Create a practical budget plan.
+
+Planner:
+{planner}
+
+User data:
+{json.dumps(data, indent=2)}
+
+Return ONLY valid JSON with this structure:
+
+{{
+  "planner": "{planner}",
+  "budget": 0,
+  "estimated_total": 0,
+  "budget_remaining": 0,
+  "allocation": {{}},
+  "summary": "",
+  "recommendations": [],
+  "ai_generated": true,
+  "source_note": ""
+}}
+
+Each recommendation should contain:
+- title
+- platform
+- category
+- estimated_price
+- quantity
+- reason
+- url
+"""
+
     try:
-        response=client.models.generate_content(model=settings.gemini_model, contents=contents, config=types.GenerateContentConfig(temperature=0.3, max_output_tokens=4000))
-        result=_clean_json(response.text)
-        result["ai_generated"]=True
-        result.setdefault("source_note","AI-generated recommendations; prices and availability must be verified.")
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+        )
+
+        text = getattr(response, "text", None)
+
+        if not text:
+            print("GEMINI RETURNED NO TEXT - USING FALLBACK PLAN")
+            return fallback
+
+        text = text.strip()
+
+        # Remove Markdown JSON fences if Gemini adds them.
+        if text.startswith("```"):
+            lines = text.splitlines()
+
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+
+            text = "\n".join(lines).strip()
+
+        result = json.loads(text)
+
+        if not isinstance(result, dict):
+            print("GEMINI RETURNED INVALID JSON - USING FALLBACK PLAN")
+            return fallback
+
+        result.setdefault("planner", planner)
+        result.setdefault("budget", float(data.get("budget", 0) or 0))
+        result.setdefault("estimated_total", 0.0)
+
+        estimated_total = float(
+            result.get("estimated_total", 0) or 0
+        )
+
+        budget = float(
+            result.get("budget", data.get("budget", 0)) or 0
+        )
+
+        result["budget_remaining"] = float(
+            max(0, budget - estimated_total)
+        )
+
+        result.setdefault("allocation", {})
+        result.setdefault("summary", "AI-generated budget plan.")
+        result.setdefault("recommendations", [])
+        result["ai_generated"] = True
+        result.setdefault(
+            "source_note",
+            "Generated using Gemini AI.",
+        )
+
         return result
-    except Exception:
+
+    except Exception as exc:
+        print(f"GEMINI FAILED - USING FALLBACK PLAN: {exc}")
         return fallback

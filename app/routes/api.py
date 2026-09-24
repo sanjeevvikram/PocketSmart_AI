@@ -1,4 +1,5 @@
 import json
+from unittest import result
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -8,6 +9,8 @@ from ..models.db import Recommendation, User
 from ..models.schemas import HomeRequest, PartyRequest, JewelryRequest, RegisterRequest, LoginRequest
 from ..services.gemini_utils import generate
 from fastapi.responses import JSONResponse
+
+from app.models import db
 
 router=APIRouter(prefix="/api")
 
@@ -58,7 +61,9 @@ async def jewelry(budget:float=Form(...),occasion:str=Form(...),outfit_descripti
         image_bytes=await outfit_image.read()
         if len(image_bytes)>5*1024*1024: raise HTTPException(413,"Image must be <= 5 MB")
         mime=outfit_image.content_type
-    result=generate("jewelry",data,image_bytes,mime); save_result(db,user,"jewelry",data,result); return result
+    result = generate("jewelry", data)
+    save_result(db, user, "jewelry", data, result)
+    return result
 
 @router.get("/history")
 def history(user:User=Depends(current_user),db:Session=Depends(get_db)):

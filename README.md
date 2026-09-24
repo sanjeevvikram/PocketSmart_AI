@@ -1,4 +1,66 @@
-# PocketSmart AI
+---
+
+## Development Phases
+
+### Phase 1 — Gemini Initialization
+
+**Status: Completed ✅**
+
+- Initialized Gemini API integration.
+- Installed the Google Gemini Python SDK.
+- Added `google-genai==1.11.0` to `requirements.txt`.
+- Added Gemini configuration support through `.env`.
+- Configured `GEMINI_MODEL=gemini-2.5-flash`.
+- Verified that the Gemini SDK is installed in the project virtual environment.
+- Kept the Gemini API key in the local `.env` file and excluded `.env` from Git.
+
+**Next Phase:** Gemini service layer integration.
+
+### Phase 2 — Gemini Service Layer
+
+**Status: Pending ⏳**
+
+- Create the Gemini service layer.
+- Connect the service to the existing PocketSmart AI backend.
+- Test Gemini communication.
+- Handle Gemini API errors safely.
+
+### Phase 3 — AI Recommendation Integration
+
+**Status: Pending ⏳**
+
+- Connect Gemini recommendations to the existing planners.
+- Generate structured recommendation responses.
+- Test Party and Home planning flows.
+
+### Phase 4 — Jewelry AI Integration
+
+**Status: Pending ⏳**
+
+- Connect Gemini to jewelry planning.
+- Support jewelry image analysis.
+- Generate AI-based jewelry recommendations.
+
+### Phase 5 — Testing & Validation
+
+**Status: Pending ⏳**
+
+- Test all Gemini-powered features.
+- Run the complete test suite.
+- Fix integration issues.
+- Verify authentication and existing functionality.
+
+### Phase 6 — Final GitHub Release
+
+**Status: Pending ⏳**
+
+- Finalize README documentation.
+- Review project configuration.
+- Commit final changes.
+- Push the completed project to GitHub.
+
+
+    # PocketSmart AI
 
 A FastAPI + Jinja2 + Gemini application based on the supplied PocketSmart AI project documentation. It provides authenticated Home, Party, and Jewelry budget planners, recommendation history, mock platform sourcing, and optional Gemini multimodal analysis for jewelry images.
 
